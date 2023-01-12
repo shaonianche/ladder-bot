@@ -3,7 +3,8 @@
 *.pyc
 node_modules
 yarn-error.log
-
+pnpm-lock.yaml
+/src/*.json
 /public
 # Build directory
 /build
@@ -16,5 +17,4 @@ _site/
 
 /.vscode
 .idea
-
-pnpm-lock.yaml
+/src/*env*.**

@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
      * 获取梯子每日流量并提醒
      * 1. 输入梯子名称、订阅链接，获取梯子订阅数据并返回
@@ -116,7 +117,12 @@ function daysUntilDate(inputDate) {
 
 function writeObjectToJsonFile(obj) {
   const jsonData = JSON.stringify(obj)
-  const fileName = `${obj.name}.json`
+  const currentScriptDir = __dirname
+  const fileName = `${currentScriptDir}/${obj.name}.json`
+  const retrnUsedTraffic = {
+    dayUsedTraffic: 0,
+    yesUsedTraffic: 0,
+  }
 
   // 判断文件是否存在
   if (fs.existsSync(fileName)) {
@@ -125,33 +131,77 @@ function writeObjectToJsonFile(obj) {
     // 将文件内容转换为对象
     const data = JSON.parse(fileData)
     // 获取最后一天日期
-    const objLastDailyDate = obj.dailyDate[obj.dailyDate.length - 1].today
-    const dataLastDailyDate = data.dailyDate[data.dailyDate.length - 1].today
+    const objLastDailyDate = obj.dailyDate[0].today
+    const dataLastDailyDate = data.dailyDate.slice(-1)[0].today
     // 如果最后一天日期相同，将新数据合并到原有数据
     if (objLastDailyDate === dataLastDailyDate) {
       // 今日使用流量 = 请求时的使用流量 - 当日第一条数据中的流量数
-      obj.dailyDate[0].trafficUsageData[0].usedTraffic = (obj.dailyDate[0].trafficUsageData[0].usedTraffic - data.dailyDate[data.dailyDate.length - 1].trafficUsageData[0].usedTraffic).toFixed(2)
-      data.dailyDate[data.dailyDate.length - 1].trafficUsageData = data.dailyDate[data.dailyDate.length - 1].trafficUsageData.concat(obj.dailyDate[0].trafficUsageData)
+      obj.dailyDate[0].trafficUsageData[0].usedTraffic = (obj.dailyDate[0].trafficUsageData[0].usedTraffic - data.dailyDate.slice(-1)[0].trafficUsageData[0].usedTraffic).toFixed(2)
+
+      data.dailyDate.slice(-1)[0].trafficUsageData = data.dailyDate.slice(-1)[0].trafficUsageData.concat(obj.dailyDate[0].trafficUsageData)
     }
 
-    else { data.dailyDate = data.dailyDate.concat(obj.dailyDate) }
+    else {
+      data.dailyDate = data.dailyDate.concat(obj.dailyDate)
+      if (Array.isArray(data.dailyDate) && data.dailyDate.length >= 2) {
+        retrnUsedTraffic.yesUsedTraffic = (data.dailyDate.slice(-1)[0].trafficUsageData[0].usedTraffic - data.dailyDate.slice(-2, -1)[0].trafficUsageData[0].usedTraffic).toFixed(2)
+        return retrnUsedTraffic
+      }
+      else { return retrnUsedTraffic }
+    }
 
     // 将对象转换为 json 字符串
     const newData = JSON.stringify(data)
     // 将数据写入文件
     fs.writeFileSync(fileName, newData)
+    retrnUsedTraffic.dayUsedTraffic = obj.dailyDate[0].trafficUsageData[0].usedTraffic
+    return retrnUsedTraffic
   }
   else {
     // 创建文件并写入数据
     fs.writeFileSync(fileName, jsonData)
+    return retrnUsedTraffic
   }
+}
+
+async function sendMessage(apiKey, chatId, message) {
+  // Create the payload for the request
+  const payload = JSON.stringify({ chat_id: chatId, text: message })
+  const options = {
+    hostname: 'api.telegram.org',
+    port: 443,
+    path: `/bot${apiKey}/sendMessage`,
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Content-Length': Buffer.byteLength(payload),
+    },
+  }
+  return new Promise((resolve, reject) => {
+    // Make the request to the Telegram API
+    const req = https.request(options, (res) => {
+      if (res.statusCode !== 200)
+        return reject(`Telegram response status code: ${res.statusCode}`)
+      res.on('data', (data) => {
+        const json = JSON.parse(data)
+        if (!json.ok)
+          return reject(`Telegram API error: ${json.description}`)
+        resolve(json.result)
+      })
+    })
+    req.on('error', err => reject(err))
+    req.write(payload)
+    req.end()
+  })
 }
 
 /**
  * @param {string} name
  * @param {string} url
+ * @param {string} apiKey
+ * @param {string} chatId
  */
-async function main(name, url) {
+async function main(name, url, apiKey, chatId) {
   /**
      * 构造写入 json 文件的数据
      * {
@@ -203,22 +253,71 @@ async function main(name, url) {
       ladders.dailyDate[0].refreshTime = refreshTime
       ladders.dailyDate[0].trafficUsageData[0].time = time
       ladders.dailyDate[0].trafficUsageData[0].usedTraffic = usedTraffic
-      writeObjectToJsonFile(ladders)
+      const retrnUsedTraffic = writeObjectToJsonFile(ladders)
+
+      // 返回梯子名称、到期时间、剩余流量、今日流量上限、请求时间、已使用流量
+      const message = {
+        time: '',
+        name: '',
+        next: '',
+
+        threshold: '',
+        usedTraffic: '',
+        yesUsedTraffic: '',
+        space: '',
+
+        unUsedTraffic: '',
+        refreshTime: '',
+        expire: '',
+
+      }
+      message.time = `${ladders.dailyDate[0].trafficUsageData[0].time}`
+      message.name = `亲爱的 ${ladders.name} 用户`
+      message.threshold = `今日流量上限：${ladders.dailyDate[0].threshold} GB`
+      message.usedTraffic = `今日已使用流量：${retrnUsedTraffic.dayUsedTraffic} GB`
+      message.yesUsedTraffic = `昨日共使用流量：${retrnUsedTraffic.yesUsedTraffic} GB`
+      message.unUsedTraffic = `机场剩余流量：${convertBytesToGB((userSubInfo.total - 0) - (userSubInfo.upload - 0) - (userSubInfo.download - 0))} GB`
+      message.refreshTime = `下次流量重置：${ladders.dailyDate[0].refreshTime} 天后`
+      message.expire = `机场到期时间：${ladders.expire} `
+
+      if (message.usedTraffic === '0') {
+        return 0
+      }
+      else {
+        let tgMessage = ''
+        for (const key in message)
+          tgMessage += (`${message[key]}\n`)
+
+        sendMessage(apiKey, chatId, tgMessage)
+          .then((response) => {
+            console.log(`Message sent with ID: ${response.message_id}`)
+          })
+          .catch((error) => {
+            console.error(error)
+          })
+      }
     }
   }).catch((error) => {
     console.error(error)
   })
 }
 
-function processInput(arg1, arg2) {
-  if (arg1 === '--help' || !arg1 || !arg2) {
-    console.log('该脚本用于计算机场流量数据，它需要以下两个参数：')
+function processInput(arg1, arg2, arg3, arg4) {
+  const args = process.argv.slice(2)
+  if (args.length < 4 || args.includes('')) {
+    console.log('该脚本用于计算机场流量数据，它需要输入以下两个参数：')
     console.log('name: 机场名称')
     console.log('url: 订阅链接')
+    console.log('apiKey: telegram api key')
+    console.log('chatId: telegram 会话 id')
+    return
   }
   const name = arg1
   const url = arg2
-  main(name, url)
+  const apiKey = arg3
+  const chatId = arg4
+
+  main(name, url, apiKey, chatId)
 }
 
-processInput(process.argv[2], process.argv[3])
+processInput(process.argv[2], process.argv[3], process.argv[4], process.argv[5])
