@@ -9,6 +9,7 @@
 
 const https = require('https')
 const fs = require('fs')
+const path = require('path')
 
 /**
  * 获取梯子订阅数据  返回：请求时间、请求头中的消息
@@ -117,8 +118,7 @@ function daysUntilDate(inputDate) {
 
 function writeObjectToJsonFile(obj) {
   const jsonData = JSON.stringify(obj)
-  const currentScriptDir = __dirname
-  const fileName = `${currentScriptDir}/${obj.name}.json`
+  const fileName = path.join(__dirname, `${obj.name}.json`)
   const retrnUsedTraffic = {
     dayUsedTraffic: 0,
     yesUsedTraffic: 0,
@@ -140,14 +140,8 @@ function writeObjectToJsonFile(obj) {
 
       data.dailyDate.slice(-1)[0].trafficUsageData = data.dailyDate.slice(-1)[0].trafficUsageData.concat(obj.dailyDate[0].trafficUsageData)
     }
-
     else {
       data.dailyDate = data.dailyDate.concat(obj.dailyDate)
-      if (Array.isArray(data.dailyDate) && data.dailyDate.length >= 2) {
-        retrnUsedTraffic.yesUsedTraffic = (data.dailyDate.slice(-1)[0].trafficUsageData[0].usedTraffic - data.dailyDate.slice(-2, -1)[0].trafficUsageData[0].usedTraffic).toFixed(2)
-        return retrnUsedTraffic
-      }
-      else { return retrnUsedTraffic }
     }
 
     // 将对象转换为 json 字符串
@@ -155,6 +149,7 @@ function writeObjectToJsonFile(obj) {
     // 将数据写入文件
     fs.writeFileSync(fileName, newData)
     retrnUsedTraffic.dayUsedTraffic = obj.dailyDate[0].trafficUsageData[0].usedTraffic
+    retrnUsedTraffic.yesUsedTraffic = (data.dailyDate.slice(-1)[0].trafficUsageData[0].usedTraffic - data.dailyDate.slice(-1)[0].trafficUsageData[0].usedTraffic).toFixed(2)
     return retrnUsedTraffic
   }
   else {
@@ -280,7 +275,7 @@ async function main(name, url, apiKey, chatId) {
       message.refreshTime = `下次流量重置：${ladders.dailyDate[0].refreshTime} 天后`
       message.expire = `机场到期时间：${ladders.expire} `
 
-      if (message.usedTraffic === '0') {
+      if (retrnUsedTraffic.dayUsedTraffic === 0) {
         return 0
       }
       else {
@@ -305,13 +300,14 @@ async function main(name, url, apiKey, chatId) {
 function processInput(arg1, arg2, arg3, arg4) {
   const args = process.argv.slice(2)
   if (args.length < 4 || args.includes('')) {
-    console.log('该脚本用于计算机场流量数据，它需要输入以下两个参数：')
+    console.log('该脚本用于计算机场流量数据，它需要输入以下四个参数：')
     console.log('name: 机场名称')
     console.log('url: 订阅链接')
     console.log('apiKey: telegram api key')
     console.log('chatId: telegram 会话 id')
     return
   }
+
   const name = arg1
   const url = arg2
   const apiKey = arg3
